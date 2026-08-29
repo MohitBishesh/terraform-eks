@@ -1,8 +1,74 @@
-# terraform-eks
+﻿# terraform-eks
+
+DevOps take-home: provision **Amazon EKS** with Terraform, then deploy a **Hello World** Python microservice (Helm / Prometheus / Grafana follow in later phases).
+
+| Phase | Status | Contents |
+|-------|--------|----------|
+| 1 - EKS + VPC | Done | Terraform under this repo root |
+| 2 - Hello World app | In progress | `web-application/` (Python + Dockerfile) |
+| 3 - Helm chart | Pending | Chart to deploy the app |
+| 4 - Prometheus / Grafana | Pending | Monitoring |
+| 5 - CI/CD | Optional | GitHub Actions / similar |
+
+## Repository layout
+
+```
+.
+├── *.tf / modules/          # Phase 1 - EKS infrastructure
+├── web-application/         # Phase 2 - Python app + Dockerfile
+│   ├── app.py
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── .dockerignore
+└── README.md
+```
+
+## Phase 2 - Hello World application
+
+Small **Flask** service that returns plain text `Hello World` on `GET /`, plus `GET /healthz` for probes.
+
+| Path | Response |
+|------|----------|
+| `GET /` | `Hello World` (200, text/plain) |
+| `GET /healthz` | `ok` (200) |
+
+Container listens on **port 8080** and runs as a non-root user with **gunicorn**.
+
+### Run locally (without Docker)
+
+```powershell
+cd web-application
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python app.py
+# then: curl http://127.0.0.1:8080/
+```
+
+### Build and run with Docker
+
+```powershell
+cd web-application
+docker build -t web-application:local .
+docker run --rm -p 8080:8080 web-application:local
+```
+
+```powershell
+curl http://127.0.0.1:8080/
+curl http://127.0.0.1:8080/healthz
+```
+
+### Next (still to do)
+
+- Create an ECR repository and push this image
+- Add a Helm chart and deploy to `devops-kubernetes-learning`
+- Wire Service / probes to `/healthz`
+
+---
+
+## Phase 1 - EKS infrastructure
 
 Phase-1 Terraform for a cost-conscious, production-like **Amazon EKS** cluster on AWS (`us-east-1`).
-
-This repository provisions the VPC and EKS infrastructure only. Later phases (Hello World Go service, Helm, Prometheus/Grafana, CI/CD) are intentionally out of scope for now.
 
 ## What this creates
 
@@ -20,12 +86,12 @@ Worker nodes have **no public IPs**. Outbound internet goes through the single N
 | 6 | Private subnet | `{cluster_name}-private-us-east-1b` | 1 | `vpc` | `10.0.11.0/24`, AZ `us-east-1b`, no public IPs |
 | 7 | Elastic IP | `{cluster_name}-nat-eip` | 1 | `vpc` | Used by the single NAT Gateway |
 | 8 | NAT Gateway | `{cluster_name}-nat` | 1 | `vpc` | In public subnet `us-east-1a` only (cost trade-off) |
-| 9 | Route table (public) | `{cluster_name}-public-rt` | 1 | `vpc` | `0.0.0.0/0` → IGW |
-| 10 | Route (public) | — | 1 | `vpc` | Default route to Internet Gateway |
-| 11 | Route table association (public) | — | 2 | `vpc` | One per public subnet |
+| 9 | Route table (public) | `{cluster_name}-public-rt` | 1 | `vpc` | `0.0.0.0/0` -> IGW |
+| 10 | Route (public) | - | 1 | `vpc` | Default route to Internet Gateway |
+| 11 | Route table association (public) | - | 2 | `vpc` | One per public subnet |
 | 12 | Route table (private) | `{cluster_name}-private-rt-{az}` | 2 | `vpc` | One per AZ |
-| 13 | Route (private) | — | 2 | `vpc` | Both `0.0.0.0/0` → shared NAT Gateway |
-| 14 | Route table association (private) | — | 2 | `vpc` | One per private subnet |
+| 13 | Route (private) | - | 2 | `vpc` | Both `0.0.0.0/0` -> shared NAT Gateway |
+| 14 | Route table association (private) | - | 2 | `vpc` | One per private subnet |
 | 15 | IAM role | `{cluster_name}-cluster-role` | 1 | `eks` | Trust: `eks.amazonaws.com` |
 | 16 | IAM role policy attachment | AmazonEKSClusterPolicy | 1 | `eks` | Attached to cluster role |
 | 17 | IAM role | `{cluster_name}-node-role` | 1 | `eks` | Trust: `ec2.amazonaws.com` |
@@ -42,7 +108,7 @@ Worker nodes have **no public IPs**. Outbound internet goes through the single N
 | 28 | EKS add-on | `kube-proxy` | 1 | `eks` | Service networking |
 | 29 | EKS add-on | `aws-ebs-csi-driver` | 1 | `eks` | Persistent volumes via IRSA |
 
-**Also created implicitly by AWS (not separate Terraform resources):** EKS cluster security group, node security group / ENIs, EC2 instances for the managed node group (2× `t3.medium` + root EBS volumes).
+**Also created implicitly by AWS (not separate Terraform resources):** EKS cluster security group, node security group / ENIs, EC2 instances for the managed node group (2x `t3.medium` + root EBS volumes).
 
 **Default cluster name:** `devops-kubernetes-learning` (override with `cluster_name` in `terraform.tfvars`).
 
@@ -51,31 +117,18 @@ Worker nodes have **no public IPs**. Outbound internet goes through the single N
 ```
 VPC 10.0.0.0/16
 ├── Internet Gateway
-├── Public subnet us-east-1a (10.0.0.0/24) ── NAT Gateway + EIP
+├── Public subnet us-east-1a (10.0.0.0/24) -- NAT Gateway + EIP
 ├── Public subnet us-east-1b (10.0.1.0/24)
-├── Private subnet us-east-1a (10.0.10.0/24) ── EKS worker nodes
-└── Private subnet us-east-1b (10.0.11.0/24) ── EKS worker nodes
-         └── both private route tables → single NAT
-```
-
-## Repository layout
-
-```
-.
-├── versions.tf / providers.tf / backend.tf
-├── main.tf / variables.tf / outputs.tf
-├── terraform.tfvars.example
-├── modules/
-│   ├── vpc/
-│   └── eks/
-└── README.md
+├── Private subnet us-east-1a (10.0.10.0/24) -- EKS worker nodes
+└── Private subnet us-east-1b (10.0.11.0/24) -- EKS worker nodes
+         └── both private route tables -> single NAT
 ```
 
 ## Prerequisites
 
 - [Terraform](https://developer.hashicorp.com/terraform/install) `>= 1.5`
 - [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
-- AWS credentials with permission to create VPC, EKS, IAM, EC2 (prefer an **EC2 instance profile** or temporary credentials — do not hard-code keys)
+- AWS credentials with permission to create VPC, EKS, IAM, EC2 (prefer an **EC2 instance profile** or temporary credentials - do not hard-code keys)
 - `kubectl` (after the cluster exists)
 
 Verify identity:
@@ -95,7 +148,7 @@ copy terraform.tfvars.example terraform.tfvars
 
 Edit `terraform.tfvars` as needed. Important settings:
 
-- **`public_access_cidrs`** — your **public** IP (not `192.168.x.x`). Find it with:
+- **`public_access_cidrs`** - your **public** IP (not `192.168.x.x`). Find it with:
 
   ```powershell
   (Invoke-RestMethod -Uri "https://checkip.amazonaws.com").Trim()
@@ -111,7 +164,7 @@ Edit `terraform.tfvars` as needed. Important settings:
 
   Never use `0.0.0.0/0` in committed config.
 
-- **`kubernetes_version`** — defaults to `1.35` (variable, upgradeable later).
+- **`kubernetes_version`** - defaults to `1.35` (variable, upgradeable later).
 
 ### 2. Initialize Terraform
 
@@ -132,7 +185,7 @@ terraform validate
 terraform plan
 ```
 
-Review the plan carefully (NAT, EKS control plane, 2× `t3.medium`, EIP).
+Review the plan carefully (NAT, EKS control plane, 2x `t3.medium`, EIP).
 
 ### 5. Apply (only when you intend to create AWS resources)
 
@@ -140,7 +193,7 @@ Review the plan carefully (NAT, EKS control plane, 2× `t3.medium`, EIP).
 terraform apply
 ```
 
-First apply typically takes **15–25 minutes** (EKS control plane + node group).
+First apply typically takes **15-25 minutes** (EKS control plane + node group).
 
 ### 6. Configure kubectl
 
@@ -164,13 +217,13 @@ These choices are intentional for a take-home budget while staying reasonably pr
 | Choice | Benefit | Trade-off |
 |--------|---------|-----------|
 | 2 AZs (not 3) | Lower footprint | Less AZ diversity |
-| **1 NAT Gateway** | ~½ NAT cost vs per-AZ | If the NAT’s AZ fails, private egress fails |
-| `t3.medium` × 2 (max 3) | Low compute cost | Limited capacity for heavy workloads |
+| **1 NAT Gateway** | ~1/2 NAT cost vs per-AZ | If the NAT AZ fails, private egress fails |
+| `t3.medium` x 2 (max 3) | Low compute cost | Limited capacity for heavy workloads |
 | Private worker nodes | Better isolation | Need NAT for outbound pulls |
 | Control-plane logging off by default | Avoids CloudWatch log spend | Enable via `enable_cluster_log_types` if needed |
 | No ALB / VPC interface endpoints yet | No idle LB / endpoint charges | Add in later phases when required |
 
-**Main recurring cost drivers:** NAT Gateway, 2× `t3.medium`, EKS control plane (~$0.10/hr). Rough lean total if left running: on the order of **~$170–220/month**. Destroy when idle.
+**Main recurring cost drivers:** NAT Gateway, 2x `t3.medium`, EKS control plane (~$0.10/hr). Rough lean total if left running: on the order of **~$170-220/month**. Destroy when idle.
 
 ## Security notes
 
@@ -189,12 +242,12 @@ terraform destroy
 
 Confirm the NAT EIP and node group are gone in the AWS console afterward.
 
-## What’s not included yet
+## What's not included yet
 
-- Hello World application / Dockerfile / ECR
-- Helm chart
+- ECR repository / image push automation
+- Helm chart for `web-application`
 - Prometheus / Grafana
 - HPA, PDB, NetworkPolicy
 - GitHub Actions CI/CD
 
-Those will be added after this cluster is verified.
+Those come after the app image is built and the cluster deploy path is verified.

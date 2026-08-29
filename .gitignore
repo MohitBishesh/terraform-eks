@@ -14,3 +14,10 @@ terraform.tfvars
 *.auto.tfvars.json
 .terraformrc
 terraform.rc
+
+# Python / local tooling
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
