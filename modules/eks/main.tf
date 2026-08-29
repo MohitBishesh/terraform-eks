@@ -142,7 +142,8 @@ resource "aws_eks_node_group" "this" {
   })
 
   labels = {
-    role = "worker"
+    role            = "worker"
+    "workload.type" = "worker-webapp"
   }
 
   depends_on = [

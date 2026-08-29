@@ -6,14 +6,45 @@ This repository provisions the VPC and EKS infrastructure only. Later phases (He
 
 ## What this creates
 
-| Layer | Resources |
-|-------|-----------|
-| Network | VPC (`10.0.0.0/16`), IGW, 2 public + 2 private subnets across `us-east-1a` / `us-east-1b`, **1 NAT Gateway**, route tables |
-| Compute | EKS cluster (default Kubernetes **1.35**), managed node group (`t3.medium`, desired/min **2**, max **3**) in private subnets |
-| Add-ons | `vpc-cni`, `coredns`, `kube-proxy`, `aws-ebs-csi-driver` (IRSA) |
-| IAM | Cluster role, node role, EBS CSI IRSA role (no IAM users / access keys in code) |
+Worker nodes have **no public IPs**. Outbound internet goes through the single NAT Gateway. Node label: `workload.type=worker-webapp`.
 
-Worker nodes have **no public IPs**. Outbound internet goes through the single NAT Gateway.
+### Resources created by Terraform
+
+| # | AWS resource type | Name / identity (pattern) | Count | Module | Notes |
+|---|-------------------|---------------------------|------:|--------|-------|
+| 1 | VPC | `{cluster_name}-vpc` | 1 | `vpc` | CIDR `10.0.0.0/16`, DNS hostnames/support enabled |
+| 2 | Internet Gateway | `{cluster_name}-igw` | 1 | `vpc` | Attached to VPC |
+| 3 | Public subnet | `{cluster_name}-public-us-east-1a` | 1 | `vpc` | `10.0.0.0/24`, AZ `us-east-1a`, public IPs on launch |
+| 4 | Public subnet | `{cluster_name}-public-us-east-1b` | 1 | `vpc` | `10.0.1.0/24`, AZ `us-east-1b` |
+| 5 | Private subnet | `{cluster_name}-private-us-east-1a` | 1 | `vpc` | `10.0.10.0/24`, AZ `us-east-1a`, no public IPs |
+| 6 | Private subnet | `{cluster_name}-private-us-east-1b` | 1 | `vpc` | `10.0.11.0/24`, AZ `us-east-1b`, no public IPs |
+| 7 | Elastic IP | `{cluster_name}-nat-eip` | 1 | `vpc` | Used by the single NAT Gateway |
+| 8 | NAT Gateway | `{cluster_name}-nat` | 1 | `vpc` | In public subnet `us-east-1a` only (cost trade-off) |
+| 9 | Route table (public) | `{cluster_name}-public-rt` | 1 | `vpc` | `0.0.0.0/0` → IGW |
+| 10 | Route (public) | — | 1 | `vpc` | Default route to Internet Gateway |
+| 11 | Route table association (public) | — | 2 | `vpc` | One per public subnet |
+| 12 | Route table (private) | `{cluster_name}-private-rt-{az}` | 2 | `vpc` | One per AZ |
+| 13 | Route (private) | — | 2 | `vpc` | Both `0.0.0.0/0` → shared NAT Gateway |
+| 14 | Route table association (private) | — | 2 | `vpc` | One per private subnet |
+| 15 | IAM role | `{cluster_name}-cluster-role` | 1 | `eks` | Trust: `eks.amazonaws.com` |
+| 16 | IAM role policy attachment | AmazonEKSClusterPolicy | 1 | `eks` | Attached to cluster role |
+| 17 | IAM role | `{cluster_name}-node-role` | 1 | `eks` | Trust: `ec2.amazonaws.com` |
+| 18 | IAM role policy attachment | AmazonEKSWorkerNodePolicy | 1 | `eks` | Attached to node role |
+| 19 | IAM role policy attachment | AmazonEKS_CNI_Policy | 1 | `eks` | Attached to node role |
+| 20 | IAM role policy attachment | AmazonEC2ContainerRegistryReadOnly | 1 | `eks` | Attached to node role |
+| 21 | EKS cluster | `devops-kubernetes-learning` | 1 | `eks` | Kubernetes **1.35** (variable); private + CIDR-restricted public API |
+| 22 | EKS managed node group | `{cluster_name}-workers` | 1 | `eks` | `t3.medium`, desired/min **2**, max **3**, private subnets; labels `role=worker`, `workload.type=worker-webapp` |
+| 23 | IAM OIDC provider | `{cluster_name}-oidc` | 1 | `eks` | Enables IRSA |
+| 24 | IAM role | `{cluster_name}-ebs-csi-role` | 1 | `eks` | IRSA for `kube-system:ebs-csi-controller-sa` |
+| 25 | IAM role policy attachment | AmazonEBSCSIDriverPolicy | 1 | `eks` | Attached to EBS CSI IRSA role |
+| 26 | EKS add-on | `vpc-cni` | 1 | `eks` | Cluster networking |
+| 27 | EKS add-on | `coredns` | 1 | `eks` | Cluster DNS |
+| 28 | EKS add-on | `kube-proxy` | 1 | `eks` | Service networking |
+| 29 | EKS add-on | `aws-ebs-csi-driver` | 1 | `eks` | Persistent volumes via IRSA |
+
+**Also created implicitly by AWS (not separate Terraform resources):** EKS cluster security group, node security group / ENIs, EC2 instances for the managed node group (2× `t3.medium` + root EBS volumes).
+
+**Default cluster name:** `devops-kubernetes-learning` (override with `cluster_name` in `terraform.tfvars`).
 
 ## Architecture
 
@@ -116,6 +147,7 @@ First apply typically takes **15–25 minutes** (EKS control plane + node group)
 ```powershell
 aws eks update-kubeconfig --region us-east-1 --name devops-kubernetes-learning
 kubectl get nodes
+kubectl get nodes --show-labels
 kubectl get pods -A
 ```
 
