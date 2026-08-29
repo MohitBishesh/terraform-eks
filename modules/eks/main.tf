@@ -85,6 +85,11 @@ resource "aws_eks_cluster" "this" {
   role_arn = aws_iam_role.cluster.arn
   version  = var.cluster_version
 
+  # Must match imported / existing clusters (API returns false). Leaving the
+  # provider default (true) forces cluster replacement. Add-ons are managed
+  # explicitly via aws_eks_addon in addons.tf instead.
+  bootstrap_self_managed_addons = false
+
   vpc_config {
     subnet_ids              = var.private_subnet_ids
     endpoint_private_access = var.endpoint_private_access
