@@ -25,12 +25,13 @@ DevOps take-home: provision **Amazon EKS** with Terraform, then deploy a **Hello
 
 ## Phase 2 - Hello World application
 
-Small **Flask** service that returns plain text `Hello World` on `GET /`, plus `GET /healthz` for probes.
+Small **Flask** service with an animated landing page, plus plain-text and health endpoints.
 
 | Path | Response |
 |------|----------|
-| `GET /` | `Hello World` (200, text/plain) |
-| `GET /healthz` | `ok` (200) |
+| `GET /` | Styled HTML page with animated **Hello World** |
+| `GET /api/hello` | Plain text `Hello World` (assignment-friendly) |
+| `GET /healthz` | `ok` (200) for probes |
 
 Container listens on **port 8080** and runs as a non-root user with **gunicorn**.
 
@@ -42,7 +43,8 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python app.py
-# then: curl http://127.0.0.1:8080/
+# UI:   http://127.0.0.1:8080/
+# text: http://127.0.0.1:8080/api/hello
 ```
 
 ### Build and run with Docker
@@ -54,9 +56,11 @@ docker run --rm -p 8080:8080 web-application:local
 ```
 
 ```powershell
-curl http://127.0.0.1:8080/
+curl http://127.0.0.1:8080/api/hello
 curl http://127.0.0.1:8080/healthz
 ```
+
+Open `http://127.0.0.1:8080/` in a browser for the UI.
 
 ### Next (still to do)
 
