@@ -114,7 +114,7 @@ First apply typically takes **15–25 minutes** (EKS control plane + node group)
 ### 6. Configure kubectl
 
 ```powershell
-aws eks update-kubeconfig --region us-east-1 --name devops-take-home
+aws eks update-kubeconfig --region us-east-1 --name devops-kubernetes-learning
 kubectl get nodes
 kubectl get pods -A
 ```
