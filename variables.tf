@@ -79,13 +79,13 @@ variable "endpoint_private_access" {
 variable "endpoint_public_access" {
   description = "Whether the EKS API server endpoint is publicly reachable"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "public_access_cidrs" {
   description = "CIDR blocks allowed to reach the public EKS API endpoint (ignored when public access is false)"
   type        = list(string)
-  default     = []
+  default     = ["103.206.8.252/32"]
 }
 
 variable "enable_cluster_log_types" {

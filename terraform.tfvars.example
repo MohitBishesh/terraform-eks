@@ -16,9 +16,7 @@ node_min_size       = 2
 node_max_size       = 3
 node_disk_size      = 20
 
-# Public API allowed only from this machine's current public IP.
-# Re-check with: (Invoke-RestMethod https://checkip.amazonaws.com).Trim()
-# Never use 0.0.0.0/0.
+# kubectl from outside the EKS VPC (Windows). Never use 0.0.0.0/0.
 endpoint_private_access = true
 endpoint_public_access  = true
 public_access_cidrs     = ["103.206.8.252/32"]
