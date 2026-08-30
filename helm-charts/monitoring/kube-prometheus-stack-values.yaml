@@ -1,0 +1,123 @@
+# Custom values for prometheus-community/kube-prometheus-stack
+# Chart: https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack
+#
+# Tuned for this take-home cluster:
+#   - 2x t3.medium (2 vCPU / 4 GiB each)
+#   - Cost-conscious: short retention, no persistence, single replicas
+#   - Cluster + app monitoring (ServiceMonitors enabled)
+#
+# Install:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm repo update
+#   kubectl create namespace monitoring
+#   helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack \
+#     --namespace monitoring \
+#     -f helm-charts/monitoring/kube-prometheus-stack-values.yaml
+
+fullnameOverride: "kube-prom"
+
+defaultRules:
+  create: true
+  rules:
+    # Keep useful cluster rules; skip noisy/optional ones for a small demo cluster.
+    etcd: false
+    kubeScheduler: false
+    kubeControllerManager: false
+    kubeProxy: true
+    kubelet: true
+    kubernetes: true
+    node: true
+    windows: false
+
+alertmanager:
+  enabled: false
+
+prometheus:
+  enabled: true
+  prometheusSpec:
+    replicas: 1
+    retention: 3d
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    # Discover ServiceMonitors / PodMonitors in all namespaces (app + kube-system).
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    serviceMonitorNamespaceSelector: {}
+    podMonitorSelector: {}
+    podMonitorNamespaceSelector: {}
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 500m
+        memory: 768Mi
+    # No PVC for cost; metrics are ephemeral (acceptable for take-home).
+    storageSpec: {}
+  service:
+    type: ClusterIP
+
+grafana:
+  enabled: true
+  adminUser: admin
+  # Change after first login in a real environment.
+  adminPassword: "ChangeMe-DevOpsTakeHome"
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  persistence:
+    enabled: false
+  service:
+    type: ClusterIP
+  # Default dashboards that ship with the chart (cluster / node / pod views).
+  defaultDashboardsEnabled: true
+  defaultDashboardsTimezone: utc
+  sidecar:
+    dashboards:
+      enabled: true
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 20m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# Control-plane components are AWS-managed on EKS — scrapes usually fail; disable.
+kubeEtcd:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: true
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi

@@ -80,6 +80,15 @@ readinessProbe:
 
 podAnnotations: {}
 
+# Scraped by kube-prometheus-stack after the monitoring stack is installed.
+# Requires app image that exposes GET /metrics (prometheus-client).
+serviceMonitor:
+  enabled: true
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
 serviceAccount:
   create: false
   name: ""

@@ -6,17 +6,18 @@ DevOps take-home: provision **Amazon EKS** with Terraform, then deploy a **Hello
 |-------|--------|----------|
 | 1 - EKS + VPC | Done | Terraform under this repo root |
 | 2 - Hello World app | Done | `web-application/` (Python + Dockerfile) |
-| 3 - Helm chart | In progress | `helm-charts/web-application/` |
-| 4 - Prometheus / Grafana | Pending | Monitoring |
+| 3 - Helm chart | Done | `helm-charts/web-application/` |
+| 4 - Prometheus / Grafana | In progress | `helm-charts/monitoring/` (kube-prometheus-stack values) |
 | 5 - CI/CD | Optional | GitHub Actions / similar |
 
 ## Repository layout
 
 ```
 .
-├── *.tf / modules/          # Phase 1 - EKS infrastructure
-├── web-application/         # Phase 2 - Python app + Dockerfile
-├── helm-charts/web-application/  # Phase 3 - Helm chart
+├── *.tf / modules/                 # Phase 1 - EKS infrastructure
+├── web-application/                # Phase 2 - Python app + Dockerfile
+├── helm-charts/web-application/    # Phase 3 - App Helm chart
+├── helm-charts/monitoring/         # Phase 4 - Prometheus/Grafana values overrides
 └── README.md
 ```
 
@@ -29,6 +30,7 @@ Small **Flask** service with an animated landing page, plus plain-text and healt
 | `GET /` | Styled HTML page with animated **Hello World** |
 | `GET /api/hello` | Plain text `Hello World` (assignment-friendly) |
 | `GET /healthz` | `ok` (200) for probes |
+| `GET /metrics` | Prometheus metrics (`webapp_hello_requests_total`, etc.) |
 
 Container listens on **port 8080** and runs as a non-root user with **gunicorn**.
 
@@ -120,6 +122,83 @@ Then open http://127.0.0.1:8080/ (UI) or http://127.0.0.1:8080/api/hello (plain 
 
 ```bash
 helm uninstall web-application
+```
+
+---
+
+## Phase 4 - Prometheus and Grafana
+
+Uses the public **kube-prometheus-stack** Helm chart (Prometheus Operator + Prometheus + Grafana + node-exporter + kube-state-metrics) with a **custom values override** tuned for this small EKS cluster. **Alertmanager is disabled** (not required for the take-home; saves resources on `t3.medium`).
+
+Override file: `helm-charts/monitoring/kube-prometheus-stack-values.yaml`
+
+Design choices (cost / size):
+- Single Prometheus + Grafana replicas
+- **No persistent volumes** (ephemeral metrics; no extra EBS cost)
+- Short Prometheus retention (`3d`)
+- Low CPU/memory requests suitable for `t3.medium`
+- Disable etcd / controller-manager / scheduler scrapes (not exposed on EKS)
+- **Alertmanager disabled** (Prometheus + Grafana are enough for the assignment)
+- ServiceMonitor discovery across namespaces (scrapes the web app)
+
+### Install monitoring stack
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+kubectl create namespace monitoring
+
+helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  -f helm-charts/monitoring/kube-prometheus-stack-values.yaml
+```
+
+Wait until pods are ready:
+
+```bash
+kubectl get pods -n monitoring
+```
+
+### Rebuild/push app image (for /metrics), then upgrade app chart
+
+The ServiceMonitor scrapes `/metrics`. Rebuild after pulling these app changes:
+
+```bash
+cd web-application
+docker build -t mohitbishesh/hello-world:main .
+docker push mohitbishesh/hello-world:main
+
+cd ..
+helm upgrade --install web-application ./helm-charts/web-application
+kubectl rollout restart deployment/web-application
+```
+
+### Access Grafana / Prometheus (port-forward)
+
+```bash
+# Grafana (admin / ChangeMe-DevOpsTakeHome)
+kubectl port-forward -n monitoring svc/kube-prom-grafana 3000:80
+
+# Prometheus UI
+kubectl port-forward -n monitoring svc/kube-prom-kube-prome-prometheus 9090:9090
+```
+
+Open:
+- Grafana: http://127.0.0.1:3000
+- Prometheus: http://127.0.0.1:9090
+
+Useful Grafana dashboards (imported by the chart): Kubernetes / Compute Resources / Node Exporter.
+
+Prometheus query examples:
+- `up{job="web-application"}` or targets named after the ServiceMonitor
+- `webapp_hello_requests_total`
+
+### Uninstall monitoring
+
+```bash
+helm uninstall kube-prom -n monitoring
+kubectl delete namespace monitoring
 ```
 
 ---
@@ -302,8 +381,8 @@ Confirm the NAT EIP and node group are gone in the AWS console afterward.
 
 ## What's not included yet
 
-- Prometheus / Grafana
 - HPA, PDB, NetworkPolicy
 - GitHub Actions CI/CD
+- Persistent Grafana/Prometheus storage (intentionally off for cost)
 
-Those come after the Helm deploy is verified.
+Optional next steps after monitoring is verified.
