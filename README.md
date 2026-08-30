@@ -66,15 +66,15 @@ Bare tags like `hello-world:main` push to Docker's **official** repo and will fa
 ```bash
 cd web-application
 docker login -u mohitbishesh
-docker build -t mohitbishesh/web-application:main .
-docker push mohitbishesh/web-application:main
+docker build -t mohitbishesh/hello-world:main .
+docker push mohitbishesh/hello-world:main
 ```
 
 If you already built `hello-world:local`:
 
 ```bash
-docker tag hello-world:local mohitbishesh/web-application:main
-docker push mohitbishesh/web-application:main
+docker tag hello-world:local mohitbishesh/hello-world:main
+docker push mohitbishesh/hello-world:main
 ```
 
 If push says `insufficient scopes`, create a Docker Hub **Personal Access Token** with Read/Write and login again with that token as the password.
@@ -92,7 +92,7 @@ If push says `insufficient scopes`, create a Docker Hub **Personal Access Token*
 Chart path: `helm-charts/web-application/`
 
 Defaults:
-- Image: `mohitbishesh/web-application:main`
+- Image: `mohitbishesh/hello-world:main`
 - 2 replicas
 - `ClusterIP` service on port 80 → container 8080
 - Resources (per pod): requests `100m` / `128Mi`, limits `400m` / `256Mi` (fits 2x `t3.medium` with system add-ons)
@@ -106,8 +106,9 @@ Defaults:
 # from repo root, with kubeconfig already set
 helm upgrade --install web-application ./helm-charts/web-application \
   --namespace default \
-  --set image.repository=mohitbishesh/web-application \
-  --set image.tag=main
+  --set image.repository=mohitbishesh/hello-world \
+  --set image.tag=main \
+  --set image.pullPolicy=Always
 
 kubectl get pods -l app.kubernetes.io/name=web-application
 kubectl port-forward svc/web-application 8080:80

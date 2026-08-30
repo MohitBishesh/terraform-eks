@@ -6,9 +6,9 @@
 replicaCount: 2
 
 image:
-  repository: mohitbishesh/web-application
+  repository: mohitbishesh/hello-world
   tag: main
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
 imagePullSecrets: []
 nameOverride: ""
