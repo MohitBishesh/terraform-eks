@@ -5,8 +5,8 @@ DevOps take-home: provision **Amazon EKS** with Terraform, then deploy a **Hello
 | Phase | Status | Contents |
 |-------|--------|----------|
 | 1 - EKS + VPC | Done | Terraform under this repo root |
-| 2 - Hello World app | In progress | `web-application/` (Python + Dockerfile) |
-| 3 - Helm chart | Pending | Chart to deploy the app |
+| 2 - Hello World app | Done | `web-application/` (Python + Dockerfile) |
+| 3 - Helm chart | In progress | `helm-charts/web-application/` |
 | 4 - Prometheus / Grafana | Pending | Monitoring |
 | 5 - CI/CD | Optional | GitHub Actions / similar |
 
@@ -16,10 +16,7 @@ DevOps take-home: provision **Amazon EKS** with Terraform, then deploy a **Hello
 .
 ├── *.tf / modules/          # Phase 1 - EKS infrastructure
 ├── web-application/         # Phase 2 - Python app + Dockerfile
-│   ├── app.py
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── .dockerignore
+├── helm-charts/web-application/  # Phase 3 - Helm chart
 └── README.md
 ```
 
@@ -62,11 +59,67 @@ curl http://127.0.0.1:8080/healthz
 
 Open `http://127.0.0.1:8080/` in a browser for the UI.
 
+### Push image to Docker Hub
+
+Bare tags like `hello-world:main` push to Docker's **official** repo and will fail. Always prefix with your Hub username:
+
+```bash
+cd web-application
+docker login -u mohitbishesh
+docker build -t mohitbishesh/web-application:main .
+docker push mohitbishesh/web-application:main
+```
+
+If you already built `hello-world:local`:
+
+```bash
+docker tag hello-world:local mohitbishesh/web-application:main
+docker push mohitbishesh/web-application:main
+```
+
+If push says `insufficient scopes`, create a Docker Hub **Personal Access Token** with Read/Write and login again with that token as the password.
+
 ### Next (still to do)
 
-- Create an ECR repository and push this image
-- Add a Helm chart and deploy to `devops-kubernetes-learning`
-- Wire Service / probes to `/healthz`
+- Confirm image is public (or configure `imagePullSecrets`) so EKS nodes can pull it
+- Deploy with Helm (below)
+- Prometheus / Grafana
+
+---
+
+## Phase 3 - Helm chart
+
+Chart path: `helm-charts/web-application/`
+
+Defaults:
+- Image: `mohitbishesh/web-application:main`
+- 2 replicas
+- `ClusterIP` service on port 80 → container 8080
+- Resources (per pod): requests `100m` / `128Mi`, limits `400m` / `256Mi` (fits 2x `t3.medium` with system add-ons)
+- Labels: `app`, `workload.type=worker-webapp`, `tier=frontend`, plus `app.kubernetes.io/*`
+- `nodeSelector`: `workload.type=worker-webapp`, `role=worker`
+- Probes: startup + liveness + readiness on `/healthz`
+
+### Deploy to EKS
+
+```bash
+# from repo root, with kubeconfig already set
+helm upgrade --install web-application ./helm-charts/web-application \
+  --namespace default \
+  --set image.repository=mohitbishesh/web-application \
+  --set image.tag=main
+
+kubectl get pods -l app.kubernetes.io/name=web-application
+kubectl port-forward svc/web-application 8080:80
+```
+
+Then open http://127.0.0.1:8080/ (UI) or http://127.0.0.1:8080/api/hello (plain text).
+
+### Uninstall
+
+```bash
+helm uninstall web-application
+```
 
 ---
 
@@ -248,10 +301,8 @@ Confirm the NAT EIP and node group are gone in the AWS console afterward.
 
 ## What's not included yet
 
-- ECR repository / image push automation
-- Helm chart for `web-application`
 - Prometheus / Grafana
 - HPA, PDB, NetworkPolicy
 - GitHub Actions CI/CD
 
-Those come after the app image is built and the cluster deploy path is verified.
+Those come after the Helm deploy is verified.
