@@ -64,24 +64,27 @@ grafana:
   # Change after first login in a real environment.
   adminPassword: "ChangeMe-DevOpsTakeHome"
   replicas: 1
+  # Grafana 13 + default dashboards needs ~512Mi–1Gi when the UI is open.
+  # Previous 256Mi limit caused OOMKilled (exit 137) on page load.
   resources:
     requests:
-      cpu: 50m
-      memory: 128Mi
+      cpu: 100m
+      memory: 512Mi
     limits:
-      cpu: 200m
-      memory: 256Mi
+      cpu: 500m
+      memory: 1Gi
   persistence:
     enabled: false
   service:
     type: ClusterIP
-  # Default dashboards that ship with the chart (cluster / node / pod views).
+  # Keep a smaller set of defaults to reduce memory spike on first open.
   defaultDashboardsEnabled: true
   defaultDashboardsTimezone: utc
   sidecar:
     dashboards:
       enabled: true
-      searchNamespace: ALL
+      # Limit watch scope (ALL increases API + memory pressure).
+      searchNamespace: monitoring
     datasources:
       enabled: true
 

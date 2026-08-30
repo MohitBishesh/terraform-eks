@@ -1,29 +1,137 @@
 ﻿# terraform-eks
 
-DevOps take-home: provision **Amazon EKS** with Terraform, then deploy a **Hello World** Python microservice (Helm / Prometheus / Grafana follow in later phases).
+DevOps take-home: provision **Amazon EKS** with Terraform, deploy a **Hello World** Python microservice with **Helm**, and monitor the cluster and app with **Prometheus + Grafana**.
 
 | Phase | Status | Contents |
 |-------|--------|----------|
-| 1 - EKS + VPC | Done | Terraform under this repo root |
-| 2 - Hello World app | Done | `web-application/` (Python + Dockerfile) |
-| 3 - Helm chart | Done | `helm-charts/web-application/` |
-| 4 - Prometheus / Grafana | In progress | `helm-charts/monitoring/` (kube-prometheus-stack values) |
+| 1 - EKS + VPC | Done | Terraform at repo root + `modules/` |
+| 2 - Hello World app | Done | `web-application/` (Python + Dockerfile + UI) |
+| 3 - Helm chart (app) | Done | `helm-charts/web-application/` |
+| 4 - Prometheus / Grafana | Done | `helm-charts/monitoring/` + public `kube-prometheus-stack` |
 | 5 - CI/CD | Optional | GitHub Actions / similar |
 
-## Repository layout
+---
+
+## Repository layout (what lives where)
 
 ```
-.
-├── *.tf / modules/                 # Phase 1 - EKS infrastructure
-├── web-application/                # Phase 2 - Python app + Dockerfile
-├── helm-charts/web-application/    # Phase 3 - App Helm chart
-├── helm-charts/monitoring/         # Phase 4 - Prometheus/Grafana values overrides
-└── README.md
+terraform-eks/
+├── README.md
+├── .gitignore
+├── .terraform.lock.hcl
+├── docs/
+│   └── images/              # README screenshots (UI, metrics, Grafana, Prometheus)
+│
+├── # ---- Phase 1: Terraform (EKS + network) ----
+├── versions.tf              # Terraform + provider version pins
+├── providers.tf             # AWS provider + default tags
+├── backend.tf               # State backend (local by default; S3 example commented)
+├── variables.tf             # Inputs (region, cluster name, nodes, endpoint CIDRs, …)
+├── terraform.tfvars.example # Sample values (copy to terraform.tfvars)
+├── terraform.tfvars         # Local overrides (gitignored — do not commit secrets/IPs)
+├── main.tf                  # Wires module.vpc + module.eks
+├── outputs.tf               # Cluster name, endpoint, VPC IDs, kubectl helper, …
+├── modules/
+│   ├── vpc/                 # VPC, subnets, IGW, single NAT, route tables
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── versions.tf
+│   └── eks/                 # EKS cluster, node group, IAM, OIDC, add-ons
+│       ├── main.tf          # Cluster + managed node group + IAM roles
+│       ├── addons.tf        # vpc-cni, coredns, kube-proxy, ebs-csi + IRSA
+│       ├── variables.tf
+│       ├── outputs.tf
+│       └── versions.tf
+│
+├── # ---- Phase 2: Application source + container image ----
+├── web-application/
+│   ├── app.py               # Flask app: UI, /api/hello, /healthz, /metrics
+│   ├── requirements.txt     # flask, gunicorn, prometheus-client
+│   ├── Dockerfile           # python:3.12-slim, non-root, port 8080
+│   ├── .dockerignore
+│   ├── templates/
+│   │   └── index.html       # Animated Hello World UI (Mohit Bishesh)
+│   └── static/
+│       ├── css/styles.css
+│       └── js/main.js
+│
+├── # ---- Phase 3: App Helm chart ----
+├── helm-charts/
+│   └── web-application/
+│       ├── Chart.yaml
+│       ├── values.yaml      # Image, replicas, resources, nodeSelector, probes, ServiceMonitor
+│       └── templates/
+│           ├── _helpers.tpl
+│           ├── deployment.yaml
+│           ├── service.yaml
+│           ├── servicemonitor.yaml   # Tells Prometheus to scrape /metrics
+│           └── NOTES.txt
+│
+└── # ---- Phase 4: Monitoring overrides + Grafana dashboard ----
+    └── monitoring/
+        ├── kube-prometheus-stack-values.yaml
+        │         # Custom values for public chart prometheus-community/kube-prometheus-stack
+        │         # (Alertmanager off, no PVCs, Grafana 1Gi limit, scrape discovery, …)
+        └── grafana-dashboard-devops-take-home.yaml
+                  # ConfigMap (label grafana_dashboard=1) auto-loaded by Grafana sidecar
 ```
+
+### Quick map
+
+| Path | What it is | Used by |
+|------|------------|---------|
+| `*.tf`, `modules/` | AWS EKS + VPC IaC | `terraform plan/apply` |
+| `web-application/app.py` | Application code | Docker build / local Python |
+| `web-application/Dockerfile` | Container image definition | `docker build` → Docker Hub |
+| `web-application/templates` + `static` | UI assets | Served by Flask |
+| `helm-charts/web-application/` | App Kubernetes manifests as Helm chart | `helm upgrade --install web-application …` |
+| `helm-charts/web-application/templates/servicemonitor.yaml` | Prometheus scrape definition for the app | Prometheus Operator |
+| `helm-charts/monitoring/kube-prometheus-stack-values.yaml` | Override file for upstream monitoring chart | `helm … -f` with kube-prometheus-stack |
+| `helm-charts/monitoring/grafana-dashboard-devops-take-home.yaml` | Grafana dashboard **ConfigMap** | `kubectl apply -f` → Grafana sidecar |
+| `docs/images/` | Screenshots for this README | GitHub / documentation |
+
+Published container image used in cluster: **`mohitbishesh/hello-world:main`** (Docker Hub; keep the repo **Public**).
+
+---
+
+## Screenshots (working demo)
+
+### 1. Application UI
+
+Hello World landing page served from the cluster via `kubectl port-forward svc/web-application 8080:80` → http://127.0.0.1:8080/
+
+![Application UI — Hello World by Mohit Bishesh](docs/images/01-application-ui.jpg)
+
+### 2. Application metrics endpoint
+
+Prometheus exposition format at http://127.0.0.1:8080/metrics (includes `webapp_hello_requests_total` and Python/process metrics).
+
+![App /metrics endpoint](docs/images/02-app-metrics-endpoint.png)
+
+### 3. Grafana dashboard — App + Cluster
+
+Custom dashboard **DevOps Take-Home — App + Cluster** (pod CPU/memory, node CPU/memory, and more).
+
+![Grafana App + Cluster dashboard](docs/images/03-grafana-dashboard-app-cluster.png)
+
+### 4. Grafana dashboards list
+
+Built-in Kubernetes mixin dashboards plus the custom take-home dashboard.
+
+![Grafana dashboards list](docs/images/04-grafana-dashboards-list.png)
+
+### 5. Prometheus targets
+
+`serviceMonitor/default/web-application/0` showing **2/2 up** — both app pods scraped at `:8080/metrics`.
+
+![Prometheus targets — web-application UP](docs/images/05-prometheus-targets.png)
+
+---
 
 ## Phase 2 - Hello World application
 
-Small **Flask** service with an animated landing page, plus plain-text and health endpoints.
+Small **Flask** service with an animated landing page, plus plain-text, health, and metrics endpoints.
 
 | Path | Response |
 |------|----------|
@@ -83,122 +191,359 @@ If push says `insufficient scopes`, create a Docker Hub **Personal Access Token*
 
 ### Next (still to do)
 
-- Confirm image is public (or configure `imagePullSecrets`) so EKS nodes can pull it
-- Deploy with Helm (below)
-- Prometheus / Grafana
+- Optional: CI/CD (GitHub Actions)
+- Optional: HPA / NetworkPolicy
 
 ---
 
-## Phase 3 - Helm chart
+---
 
-Chart path: `helm-charts/web-application/`
+## Helm operations (Phase 3 + 4)
 
-Defaults:
-- Image: `mohitbishesh/hello-world:main`
-- 2 replicas
-- `ClusterIP` service on port 80 → container 8080
-- Resources (per pod): requests `100m` / `128Mi`, limits `400m` / `256Mi` (fits 2x `t3.medium` with system add-ons)
-- Labels: `app`, `workload.type=worker-webapp`, `tier=frontend`, plus `app.kubernetes.io/*`
-- `nodeSelector`: `workload.type=worker-webapp`, `role=worker`
-- Probes: startup + liveness + readiness on `/healthz`
+This section lists the **Helm commands used in this project**, in the order you should run them, with short explanations.
 
-### Deploy to EKS
+### Prerequisites
 
 ```bash
-# from repo root, with kubeconfig already set
+# Point kubectl at the EKS cluster (once per shell / machine)
+aws eks update-kubeconfig --region us-east-1 --name devops-kubernetes-learning
+
+# Confirm cluster access
+kubectl get nodes
+kubectl get pods -A
+
+# Helm 3 must be installed
+helm version
+```
+
+Work from the **repo root** (`terraform-eks/`) so relative `-f` / chart paths resolve correctly.
+
+---
+
+### Phase 3 — Deploy the Hello World app (local chart)
+
+**Chart:** `./helm-charts/web-application`  
+**Image:** `mohitbishesh/hello-world:main` (Docker Hub; repo must be **public**)
+
+What the chart creates:
+- `Deployment` (2 replicas, probes, resources, nodeSelector)
+- `Service` (`ClusterIP` port 80 → container 8080)
+- `ServiceMonitor` (scrapes `/metrics` after Prometheus Operator is installed)
+
+#### Install or upgrade the app
+
+```bash
+# Install if missing, or upgrade if already installed
+helm upgrade --install web-application ./helm-charts/web-application \
+  --namespace default \
+  --create-namespace \
+  --set image.repository=mohitbishesh/hello-world \
+  --set image.tag=main \
+  --set image.pullPolicy=Always
+```
+
+| Flag | Why |
+|------|-----|
+| `upgrade --install` | Idempotent: create or update in one command |
+| `./helm-charts/web-application` | Our custom chart (not a remote repo chart) |
+| `--set image.*` | Points at your Docker Hub image/tag |
+| `pullPolicy=Always` | Picks up newly pushed `:main` images |
+
+#### Verify the app release
+
+```bash
+helm list -n default
+helm status web-application -n default
+
+kubectl get deploy,svc,pods -l app.kubernetes.io/name=web-application
+kubectl get servicemonitor -A   # appears after kube-prometheus-stack CRDs exist
+```
+
+#### Access the app UI
+
+```bash
+kubectl port-forward svc/web-application 8080:80
+```
+
+- UI: http://127.0.0.1:8080/  
+- Plain text: http://127.0.0.1:8080/api/hello  
+- Health: http://127.0.0.1:8080/healthz  
+- Metrics: http://127.0.0.1:8080/metrics  
+
+#### Update app after a new image push
+
+```bash
+docker build -t mohitbishesh/hello-world:main ./web-application
+docker push mohitbishesh/hello-world:main
+
 helm upgrade --install web-application ./helm-charts/web-application \
   --namespace default \
   --set image.repository=mohitbishesh/hello-world \
   --set image.tag=main \
   --set image.pullPolicy=Always
 
-kubectl get pods -l app.kubernetes.io/name=web-application
-kubectl port-forward svc/web-application 8080:80
+kubectl rollout restart deployment/web-application
+kubectl rollout status deployment/web-application
 ```
 
-Then open http://127.0.0.1:8080/ (UI) or http://127.0.0.1:8080/api/hello (plain text).
-
-### Uninstall
+#### Uninstall the app
 
 ```bash
-helm uninstall web-application
+helm uninstall web-application -n default
 ```
 
 ---
 
-## Phase 4 - Prometheus and Grafana
+### Phase 4 — Install Prometheus + Grafana (public chart + values override)
 
-Uses the public **kube-prometheus-stack** Helm chart (Prometheus Operator + Prometheus + Grafana + node-exporter + kube-state-metrics) with a **custom values override** tuned for this small EKS cluster. **Alertmanager is disabled** (not required for the take-home; saves resources on `t3.medium`).
+We use the public chart **`prometheus-community/kube-prometheus-stack`** (Prometheus Operator, Prometheus, Grafana, node-exporter, kube-state-metrics) with our override file:
 
-Override file: `helm-charts/monitoring/kube-prometheus-stack-values.yaml`
+`helm-charts/monitoring/kube-prometheus-stack-values.yaml`
 
-Design choices (cost / size):
-- Single Prometheus + Grafana replicas
-- **No persistent volumes** (ephemeral metrics; no extra EBS cost)
+That file is intentional for this take-home:
+- **Alertmanager disabled** (not required; saves RAM/CPU)
+- **No PVCs** (no extra EBS cost; metrics/dashboard data are ephemeral)
 - Short Prometheus retention (`3d`)
-- Low CPU/memory requests suitable for `t3.medium`
-- Disable etcd / controller-manager / scheduler scrapes (not exposed on EKS)
-- **Alertmanager disabled** (Prometheus + Grafana are enough for the assignment)
-- ServiceMonitor discovery across namespaces (scrapes the web app)
+- Grafana memory sized to avoid **OOMKilled** when opening the UI (`512Mi` request / `1Gi` limit)
+- ServiceMonitor discovery enabled across namespaces (so the app can be scraped)
+- EKS control-plane scrapes disabled (etcd / scheduler / controller-manager)
 
-### Install monitoring stack
+#### 1) Add the Helm repo
 
 ```bash
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
+helm search repo kube-prometheus-stack
+```
 
+#### 2) Create the monitoring namespace
+
+```bash
 kubectl create namespace monitoring
+# safe to re-run:
+# kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+```
 
+#### 3) Install / upgrade the stack with our values file
+
+```bash
 helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack \
   --namespace monitoring \
+  --create-namespace \
   -f helm-charts/monitoring/kube-prometheus-stack-values.yaml
 ```
 
-Wait until pods are ready:
+| Piece | Meaning |
+|-------|---------|
+| Release name `kube-prom` | Matches `fullnameOverride` in the values file (service names like `kube-prom-grafana`) |
+| Chart `prometheus-community/kube-prometheus-stack` | Upstream public chart |
+| `-f ...values.yaml` | **Custom overrides** (resources, Alertmanager off, retention, etc.) |
+
+First install can take several minutes (image pulls + CRDs).
+
+#### 4) Wait until monitoring pods are healthy
 
 ```bash
-kubectl get pods -n monitoring
+kubectl get pods -n monitoring -w
+helm list -n monitoring
+helm status kube-prom -n monitoring
 ```
 
-### Rebuild/push app image (for /metrics), then upgrade app chart
+Expect roughly:
+- `prometheus-kube-prom-prometheus-0`
+- `kube-prom-grafana-...`
+- `kube-prom-operator-...`
+- `kube-prom-kube-state-metrics-...`
+- `kube-prom-prometheus-node-exporter-...` (one per node)
 
-The ServiceMonitor scrapes `/metrics`. Rebuild after pulling these app changes:
+**Grafana memory check** (must not still be 256Mi after our fix):
 
 ```bash
-cd web-application
-docker build -t mohitbishesh/hello-world:main .
+kubectl get pod -n monitoring -l app.kubernetes.io/name=grafana \
+  -o jsonpath="{.items[0].spec.containers[?(@.name=='grafana')].resources}" ; echo
+```
+
+#### 5) Integrate the web app with Prometheus
+
+Integration path:
+
+```
+web-application pods expose GET /metrics
+        ↓
+ServiceMonitor (in app Helm chart)
+        ↓
+Prometheus Operator discovers ServiceMonitor
+        ↓
+Prometheus scrapes the Service
+        ↓
+Grafana uses Prometheus datasource (auto-provisioned by the stack)
+```
+
+Ensure the app image includes `/metrics`, then upgrade the app chart so the ServiceMonitor exists:
+
+```bash
+# Rebuild/push if /metrics was added after the last image push
+docker build -t mohitbishesh/hello-world:main ./web-application
 docker push mohitbishesh/hello-world:main
 
-cd ..
-helm upgrade --install web-application ./helm-charts/web-application
-kubectl rollout restart deployment/web-application
+helm upgrade --install web-application ./helm-charts/web-application \
+  --namespace default \
+  --set image.repository=mohitbishesh/hello-world \
+  --set image.tag=main \
+  --set image.pullPolicy=Always
+
+kubectl get servicemonitor -n default
+kubectl describe servicemonitor -n default
 ```
 
-### Access Grafana / Prometheus (port-forward)
+#### 6) Access Prometheus UI and verify scrape targets
 
 ```bash
-# Grafana (admin / ChangeMe-DevOpsTakeHome)
-kubectl port-forward -n monitoring svc/kube-prom-grafana 3000:80
-
-# Prometheus UI
 kubectl port-forward -n monitoring svc/kube-prom-kube-prome-prometheus 9090:9090
 ```
 
-Open:
-- Grafana: http://127.0.0.1:3000
-- Prometheus: http://127.0.0.1:9090
+Open http://127.0.0.1:9090 → **Status → Targets**.
 
-Useful Grafana dashboards (imported by the chart): Kubernetes / Compute Resources / Node Exporter.
+Look for a target related to `web-application` / ServiceMonitor — state should be **UP**.
 
-Prometheus query examples:
-- `up{job="web-application"}` or targets named after the ServiceMonitor
-- `webapp_hello_requests_total`
+Useful queries:
+```promql
+up
+webapp_hello_requests_total
+kube_pod_info{namespace="default"}
+```
 
-### Uninstall monitoring
+Generate app traffic, then re-query:
+
+```bash
+kubectl port-forward svc/web-application 8080:80
+# visit http://127.0.0.1:8080/ a few times
+```
+
+#### 7) Access Grafana and explore dashboards
+
+```bash
+kubectl port-forward -n monitoring svc/kube-prom-grafana 3000:80
+```
+
+- URL: http://127.0.0.1:3000  
+- User: `admin`  
+- Password: `ChangeMe-DevOpsTakeHome` (from values file)
+
+In Grafana:
+1. Confirm **Prometheus** datasource is present (sidecar provisions it).
+2. Open built-in dashboards (Kubernetes / Node / Compute Resources).
+3. Import the custom take-home dashboard (next step).
+
+If Grafana restarts when opening the UI, check for **OOMKilled** and re-apply the values file (Grafana limit must be **1Gi**):
+
+```bash
+helm upgrade kube-prom prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  -f helm-charts/monitoring/kube-prometheus-stack-values.yaml
+
+kubectl rollout status deployment/kube-prom-grafana -n monitoring
+```
+
+#### 8) Load the custom Grafana dashboard (ConfigMap)
+
+File: `helm-charts/monitoring/grafana-dashboard-devops-take-home.yaml`
+
+This is a Kubernetes **ConfigMap** in namespace `monitoring` with label `grafana_dashboard: "1"`. The Grafana sidecar watches that label and loads the JSON dashboard automatically.
+
+```bash
+kubectl apply -f helm-charts/monitoring/grafana-dashboard-devops-take-home.yaml
+```
+
+Wait ~30 seconds, refresh Grafana → Dashboards → **DevOps Take-Home — App + Cluster**.
+
+Generate app traffic so app panels have data:
+
+```bash
+kubectl port-forward svc/web-application 8080:80
+# open http://127.0.0.1:8080/ several times
+```
+
+#### 9) What Prometheus scrapes (and useful queries)
+
+**How discovery works:** Prometheus Operator reads **ServiceMonitor** / **PodMonitor** objects. Your app chart creates a ServiceMonitor that selects the app Service and scrapes path **`/metrics`**. Cluster components (node-exporter, kube-state-metrics, kubelet) get ServiceMonitors from `kube-prometheus-stack`.
+
+| Source | Examples | Path / notes |
+|--------|----------|--------------|
+| **web-application** | `webapp_hello_requests_total` | ServiceMonitor → `/metrics` |
+| **node-exporter** | `node_cpu_seconds_total`, `node_memory_*`, `node_filesystem_*` | Host metrics (DaemonSet) |
+| **kube-state-metrics** | `kube_pod_*`, `kube_deployment_*`, `kube_node_*` | Kubernetes object state |
+| **kubelet / cAdvisor** | `container_cpu_usage_seconds_total`, `container_memory_working_set_bytes` | Pod/container resources |
+| **Not scraped** | etcd, scheduler, controller-manager | Disabled (AWS-managed on EKS) |
+| **Not installed** | Alertmanager | Disabled in values (saves resources) |
+
+**Application PromQL**
+
+```promql
+sum by (path) (rate(webapp_hello_requests_total[1m]))
+sum(webapp_hello_requests_total)
+up{job=~".*web-application.*"}
+sum by (pod) (rate(container_cpu_usage_seconds_total{namespace="default", pod=~"web-application.*", container!="", container!="POD"}[5m]))
+sum by (pod) (container_memory_working_set_bytes{namespace="default", pod=~"web-application.*", container!="", container!="POD"})
+kube_deployment_spec_replicas{namespace="default", deployment=~"web-application.*"}
+kube_deployment_status_replicas_available{namespace="default", deployment=~"web-application.*"}
+```
+
+**Cluster PromQL**
+
+```promql
+100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100
+sum by (namespace) (kube_pod_status_phase{phase="Running"})
+sum by (namespace, pod) (increase(kube_pod_container_status_restarts_total[5m])) > 0
+(node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) * 100
+```
+
+List live scrape targets: Prometheus UI → **Status → Targets**.
+
+```bash
+kubectl get servicemonitor -A
+kubectl get servicemonitor -n default -o yaml
+```
+
+If `kubectl get servicemonitor -n default` is empty, upgrade the app chart so the ServiceMonitor template is applied (CRDs must already exist from kube-prometheus-stack).
+
+#### 10) Uninstall monitoring (when tearing down)
 
 ```bash
 helm uninstall kube-prom -n monitoring
+kubectl delete configmap grafana-dashboard-devops-take-home -n monitoring --ignore-not-found
 kubectl delete namespace monitoring
+```
+
+---
+
+### Quick command cheat sheet
+
+```bash
+# Repos
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+# App
+helm upgrade --install web-application ./helm-charts/web-application -n default \
+  --set image.repository=mohitbishesh/hello-world --set image.tag=main --set image.pullPolicy=Always
+
+# Monitoring
+helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack -n monitoring --create-namespace \
+  -f helm-charts/monitoring/kube-prometheus-stack-values.yaml
+
+# Port-forwards
+kubectl port-forward svc/web-application 8080:80
+kubectl port-forward -n monitoring svc/kube-prom-grafana 3000:80
+kubectl port-forward -n monitoring svc/kube-prom-kube-prome-prometheus 9090:9090
+
+# Grafana custom dashboard ConfigMap
+kubectl apply -f helm-charts/monitoring/grafana-dashboard-devops-take-home.yaml
+
+# Cleanup
+helm uninstall web-application -n default
+helm uninstall kube-prom -n monitoring
 ```
 
 ---
